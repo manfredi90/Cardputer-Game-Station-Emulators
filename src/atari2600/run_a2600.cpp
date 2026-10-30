@@ -3,6 +3,7 @@
 #include "run_a2600.h"
 
 #include <cstring>
+#include "share/tv_out.h"
 
 #include "Cart.hxx"
 #include "Console.hxx"
@@ -144,6 +145,7 @@ static bool a2600_init_core(const uint8_t* romData, size_t romLen, const char* r
         const uint16_t red = (color >> 16) & 0xFF;
         const uint16_t green = (color >> 8) & 0xFF;
         const uint16_t blue = color & 0xFF;
+        tvout_set_luma_rgb(i, red, green, blue);
         s_palette565[i] = (uint16_t)(((red << 8) & 0xF800) |
                                      ((green << 3) & 0x07E0) |
                                      (blue >> 3));

@@ -5,6 +5,7 @@
 #include <Preferences.h>
 #include <string>
 #include "esp_heap_caps.h"
+#include "share/tv_out.h"
 #include "share/emu_log_cpp.h"
 
 static bool s_use_ext = false;
@@ -336,7 +337,8 @@ static void a2600_display_task(void* arg)
 
         A2600FrameSlot& slot = s_slots[slotIndex];
 
-        if (!slot.pixels || !slot.palette565 || slot.width <= 0 || slot.height <= 0) {
+        if (!slot.pixels || !slot.palette565 || slot.width <= 0 || slot.height <= 0
+            || tvout_lcd_hook()) {  // or the TV shows the frame
             portENTER_CRITICAL(&s_slotMux);
             s_slotState[slotIndex] = A2600_SLOT_FREE;
             portEXIT_CRITICAL(&s_slotMux);
@@ -412,6 +414,7 @@ void a2600_display_init(void)
     M5Cardputer.Display.setSwapBytes(true);
     M5Cardputer.Display.fillScreen(TFT_BLACK);
     a2600_reset_layout_cache();
+    tvout_init();
 
     if (!a2600_alloc_slots()) {
         EMU_LOG("[A2600][DISP] slot allocation failed\n");
@@ -536,6 +539,13 @@ void a2600_display_submit_frame(const uint8_t* indexedFrame,
                                 bool isPal)
 {
     if (!s_frameQ || !indexedFrame || !palette565 || width <= 0 || height <= 0) {
+        return;
+    }
+
+    // TV: the TIA frame (160 wide) x3, read in place
+    tvout_source_t tv = { indexedFrame, width, width, height, TVOUT_FMT_INDEX8, 3, 1, 1 };
+    tvout_set_source(&tv);
+    if (!tvout_lcd_wants_frames()) {
         return;
     }
 

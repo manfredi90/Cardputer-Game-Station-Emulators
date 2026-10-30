@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <M5Cardputer.h>
 #include "esp_heap_caps.h"
+#include "share/tv_out.h"
 
 extern "C" {
   #include "pce-go/pce.h"
@@ -163,6 +164,7 @@ static void pce_display_task(void *arg) {
     if (!msg.index_fb_base || !msg.palette || msg.width <= 0 || msg.height <= 0) {
       continue;
     }
+    if (tvout_lcd_hook()) continue;  // the TV shows the frame
 
     int srcW  = msg.width;
     int srcH  = msg.height;
@@ -308,6 +310,8 @@ extern "C" void pce_display_init(void) {
     uint16_t color = corePal[i];
     pce_palette[i] = color;
   }
+  tvout_set_palette565(pce_palette, 256, 0);
+  tvout_init();
 
   free(corePal);
 
@@ -412,6 +416,16 @@ extern "C" uint8_t* osd_gfx_framebuffer(int width, int height)
 
 extern "C" void osd_vsync(void)
 {
+  // TV: 256-pixel modes x2; wider modes show every other pixel
+  if (pce_index_fb_base) {
+    const int w = pce_fb_width;
+    tvout_source_t tv = { pce_index_fb_base + 16, pce_fb_pitch, w, pce_fb_height, TVOUT_FMT_INDEX8,
+                          (uint8_t)(w <= 256 ? 2 : (w / 2) * 3 <= 512 ? 3 : 2), 1,
+                          (uint8_t)(w <= 256 ? 1 : 2) };
+    tvout_set_source(&tv);
+  }
+  if (!tvout_lcd_wants_frames()) return;
+
   // send the frame to the display thread (non-blocking)
   pce_display_submit_frame(pce_index_fb_base,
                            pce_fb_pitch,

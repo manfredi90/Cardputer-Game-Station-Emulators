@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "esp_heap_caps.h"
+#include "share/tv_out.h"
 
 pixel* XPal = nullptr;
 pixel* BPal = nullptr;
@@ -234,6 +235,7 @@ extern "C" void SetColor(byte N, byte R, byte G, byte B)
     if (N < 80) {
         XPal[N] = (pixel)N;
         msx::g_host.rgb565[N] = c;
+        tvout_set_luma_rgb(N, R, G, B);
     }
 }
 
@@ -258,6 +260,7 @@ extern "C" int InitMachine(void)
         const unsigned b = (i & 0x03) * 255 / 3;
         BPal[i] = (pixel)i;
         msx::g_host.rgb565[i] = msx::rgb565(r, g, b);
+        tvout_set_luma_rgb(i, r, g, b);
     }
 
     return 1;
@@ -298,6 +301,10 @@ extern "C" int msx_host_prepare_runtime(void)
     if (!g_lineRenderMode) {
         std::memset(g_host.frame8, 0, kSrcW * kSrcH);
         XBuf = (pixel*)g_host.frame8;
+        // TV: 272x228 frame with borders, x2 (the side borders are cropped)
+        tvout_source_t tv = { g_host.frame8, kSrcW, kSrcW, kSrcH, TVOUT_FMT_INDEX8, 2, 1, 1 };
+        tvout_set_source(&tv);
+        tvout_init();
     } else {
         XBuf = nullptr;
     }
@@ -329,6 +336,7 @@ extern "C" void PutImage(void)
 
     const uint8_t* src = g_host.frame8;
     if (!src || !g_host.line565 || !g_host.rgb565) return;
+    if (tvout_lcd_hook()) return;  // the TV shows the frame
 
     render_frame_from_src(src);
 }

@@ -5,6 +5,7 @@
 #include <Arduino.h>
 #include <M5Cardputer.h>
 #include "esp_heap_caps.h"
+#include "share/tv_out.h"
 #include "share/emu_log_cpp.h"
 
 // Public
@@ -151,6 +152,7 @@ static void lynx_display_task(void *arg)
     if (!msg.fb || msg.width <= 0 || msg.height <= 0) {
       continue;
     }
+    if (tvout_lcd_hook()) continue;  // the TV shows the frame
 
     int srcW = msg.width;
     int srcH = msg.height;
@@ -221,6 +223,7 @@ extern "C" void lynx_display_init(void)
 {
   M5Cardputer.Display.setSwapBytes(false);
   M5Cardputer.Display.fillScreen(TFT_BLACK);
+  tvout_init();
 
   if (!s_frameQ) {
     s_frameQ = xQueueCreate(2, sizeof(LynxFrameMsg));
@@ -278,6 +281,11 @@ extern "C" void lynx_display_submit_frame(const uint16_t *fb,
                                           int height)
 {
   if (!s_frameQ || !fb) return;
+
+  // TV: 160x102 big-endian RGB565, x3 and double lines
+  tvout_source_t tv = { fb, width * 2, width, height, TVOUT_FMT_RGB565_SWAPPED, 3, 2, 1 };
+  tvout_set_source(&tv);
+  if (!tvout_lcd_wants_frames()) return;
 
   LynxFrameMsg msg;
   msg.fb     = fb;

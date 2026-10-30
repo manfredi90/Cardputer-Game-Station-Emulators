@@ -5,6 +5,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "share/tv_out.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -231,6 +232,10 @@ static void a7800_display_task(void* arg)
             continue;
         }
 
+        if (tvout_lcd_hook()) {
+            continue;  // the TV shows the frame
+        }
+
         const int64_t tVideoStart = esp_timer_get_time();
 
         A7800RenderPlan plan = {};
@@ -291,6 +296,7 @@ void a7800_video_init(double fps, unsigned baseWidth, unsigned baseHeight, float
     M5Cardputer.Display.fillScreen(TFT_BLACK);
 
     a7800_reset_layout_cache();
+    tvout_init();
 
     if (!s_frameQ) {
         s_frameQ = xQueueCreate(2, sizeof(A7800FrameMsg));
@@ -403,6 +409,21 @@ void a7800_video_submit_frame(const void* frame,
     }
     if (indexed && !palette565) {
         return;
+    }
+
+    // TV: 320-pixel frame, every other pixel x3 (the 160-pixel modes)
+    if (indexed) {
+        static const uint16_t* s_tvPalette = nullptr;
+        if (palette565 != s_tvPalette) {
+            s_tvPalette = palette565;
+            tvout_set_palette565(palette565, 256, 0);
+        }
+        tvout_source_t tv = { frame, (int)pitch, (int)width, (int)height, TVOUT_FMT_INDEX8,
+                              (uint8_t)(width > 256 ? 3 : 2), 1, (uint8_t)(width > 256 ? 2 : 1) };
+        tvout_set_source(&tv);
+        if (!tvout_lcd_wants_frames()) {
+            return;
+        }
     }
 
     A7800FrameMsg msg = {};

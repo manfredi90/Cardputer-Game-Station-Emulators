@@ -7,6 +7,7 @@ extern "C" {
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
+#include "share/tv_out.h"
 #include <algorithm>
 #include <esp_attr.h>
 #include "share/emu_log_cpp.h"
@@ -169,7 +170,10 @@ static void ws_display_task(void* arg)
   for (;;) {
     // Wait for notification
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    ws_render_one_frame();
+    // TV: 224x144 RGB565 x2
+    tvout_source_t tv = { FrameBuffer, kStride * 2, kSrcW, kSrcH, TVOUT_FMT_RGB565, 2, 1, 1 };
+    tvout_set_source(&tv);
+    if (!tvout_lcd_hook()) ws_render_one_frame();
 
     // Small pause
     if ((xTaskGetTickCount() & 7) == 0) taskYIELD();
@@ -182,6 +186,7 @@ static void ws_display_task(void* arg)
 extern "C" void ws_display_init(void)
 {
   AllocateBuffers();   // buffers video core oswan 
+  tvout_init();
 }
 
 extern "C" void ws_display_start()

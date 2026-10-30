@@ -34,15 +34,41 @@ void tvout_init(void);
 int tvout_mode(void);
 void tvout_cycle_mode(void);
 
-// The frame to show: 8-bit pixels addressed through line pointers, width up
-// to 256 (drawn with double-width pixels), height up to 240.
-void tvout_set_source8(const uint8_t *const *lines, int width, int height);
-// Brightness 0..255 of palette entry `index` (0..255).
+enum {
+  TVOUT_FMT_INDEX8 = 0,       // 8-bit palette index (brightness from tvout_set_luma*)
+  TVOUT_FMT_RGB565,           // 16-bit RGB565, native byte order
+  TVOUT_FMT_RGB565_SWAPPED,   // 16-bit RGB565, bytes exchanged (big endian)
+  TVOUT_FMT_BGR444            // 16-bit 0000BBBB GGGGRRRR
+};
+
+// The frame to show, read directly by the interrupt: it must stay valid (in
+// internal RAM) until the next call. Call again whenever the buffer or the
+// geometry changes (cheap when nothing changed). Frames that do not fit are
+// cropped around the centre; smaller ones are centred.
+typedef struct {
+  const void *base;   // first pixel
+  int pitch;          // bytes per line
+  int width, height;  // pixels
+  uint8_t format;     // TVOUT_FMT_*
+  uint8_t xscale;     // samples per pixel shown: 1..3 (100 ns each, 512 per line)
+  uint8_t yscale;     // TV lines per source line: 1 or 2 (240 lines)
+  uint8_t xstep;      // 2 = show every other pixel (wide modes), else 1
+} tvout_source_t;
+
+void tvout_set_source(const tvout_source_t *source);
+
+// Brightness 0..255 of palette entry `index` (0..255), for TVOUT_FMT_INDEX8.
 void tvout_set_luma(int index, uint8_t luma);
+void tvout_set_luma_rgb(int index, uint8_t r, uint8_t g, uint8_t b);
+void tvout_set_palette565(const uint16_t *palette, int count, int swapped);
 
 // Call from the task that draws the LCD, before drawing a frame. Returns 1
 // when the TV is on: the caller should skip the LCD (a notice is shown on it).
 int tvout_lcd_hook(void);
+// For cores that copy or queue frames for the LCD task: 0 while the TV is on
+// and the LCD has nothing new to show, so that work can be skipped. The
+// source must still be passed to tvout_set_source.
+int tvout_lcd_wants_frames(void);
 
 #ifdef __cplusplus
 }

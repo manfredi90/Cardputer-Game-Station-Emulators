@@ -3,6 +3,7 @@
 #include "ngc_display.h"
 #include <M5Cardputer.h>
 #include <string.h>
+#include "share/tv_out.h"
 #include <atomic>
 
 // Framebuffer NGPC 160x152
@@ -68,6 +69,7 @@ extern "C" void ngc_display_init(void)
 
   M5.Display.setSwapBytes(true);
   M5.Display.fillScreen(TFT_BLACK);
+  tvout_init();
 }
 
 extern "C" void ngc_display_set_parity(bool odd) {
@@ -244,6 +246,25 @@ extern "C" IRAM_ATTR void graphics_paint(unsigned char render)
 {
   if (!render || !drawBuffer) return;
   if (!s_lut_ready) build_scale_luts();
+
+  // TV: the whole 160x152 frame x2
+#ifdef NGP_USE_THREADED_COLORMAPPING
+  tvout_source_t tv = { drawBuffer, NGPC_W * 2, NGPC_W, NGPC_H, TVOUT_FMT_BGR444, 2, 1, 1 };
+#else
+  tvout_source_t tv = { drawBuffer, NGPC_W * 2, NGPC_W, NGPC_H, TVOUT_FMT_RGB565, 2, 1, 1 };
+#endif
+  tvout_set_source(&tv);
+#ifdef NGP_ONLY_RENDER_VISIBLE_LINES
+  // The core skips the lines the LCD does not show; the TV needs them all.
+  static bool s_tvAllLines = false;
+  const bool tvOn = tvout_mode() != TVOUT_OFF;
+  if (tvOn != s_tvAllLines) {
+    s_tvAllLines = tvOn;
+    if (tvOn) memset(s_lut_y_render, 1, NGPC_H);
+    else build_scale_luts();
+  }
+#endif
+  if (tvout_lcd_hook()) return;  // the TV shows the frame
   
   if (s_lastScreenMode && !ngpFullscreen) {
     M5.Display.fillScreen(TFT_BLACK);

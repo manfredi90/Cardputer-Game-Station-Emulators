@@ -5,6 +5,7 @@
 #include <M5Unified.h>
 #include <algorithm>
 #include <string.h>
+#include "share/tv_out.h"
 
 extern "C" {
   #include "sms/smsplus/shared.h"
@@ -88,12 +89,16 @@ void sms_display_init() {
   }
 
   M5.Display.fillScreen(TFT_BLACK);
+  tvout_init();
   EMU_LOG("Display init: %dx%d OK\n", LCD_W, LCD_H);
 }
 
 void sms_palette_init_fixed(){
-  for (int i=0;i<256;i++)
+  for (int i=0;i<256;i++) {
     sms_palette_565[i] = rgb888_to_565(sms_palette_rgb[i]);
+    const uint32_t c = sms_palette_rgb[i];
+    tvout_set_luma_rgb(i, (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+  }
 }
 
 static inline void compute_common(bool fullscreenMode){
@@ -140,6 +145,12 @@ void video_compute_scaler_full()   { compute_common(true);  }
 void video_compute_scaler_square() { compute_common(false); }
 
 void sms_display_write_frame() {
+  // TV: the visible area of the VDP bitmap (Game Gear: its 160x144 window)
+  tvout_source_t tv = { bitmap.data + srcY0 * bitmap.pitch + srcX0, bitmap.pitch, srcW, srcH,
+                        TVOUT_FMT_INDEX8, 2, 1, 1 };
+  tvout_set_source(&tv);
+  if (tvout_lcd_hook()) return;
+
   M5.Display.startWrite();
 
   M5.Display.setAddrWindow(offX, offY, dstW, dstH);

@@ -89,6 +89,20 @@ constexpr int kHsync = 47;  // 4.7 us
 
 enum : uint8_t { T_BLANK = 0, T_BROAD, T_ACTIVE };
 
+// A source frame, ready for the interrupt: cropped to fit, base adjusted.
+struct Src {
+  const uint8_t* base;  // first pixel shown
+  int pitch;            // bytes per source line
+  int w, h;             // pixels shown (after the x step) and lines
+  int ox;               // first sample, from the start of the active area (even)
+  int ty;               // first active line used
+  uint8_t wide;         // 2-byte pixels
+  uint8_t k;            // samples per pixel, 1..3
+  uint8_t v;            // TV lines per source line, 1..2
+  uint8_t step;         // source pixels per shown pixel, 1..2
+  uint32_t gen;         // geometry generation, to clear stale borders
+};
+
 struct Desc {
   volatile uint32_t dw0;  // size[11:0], length[23:12], owner[31]
   const uint8_t* buf;
@@ -106,8 +120,10 @@ uint8_t s_bufType[kBufs];
 uint32_t* s_tplBlank;
 uint32_t* s_tplBroad;
 uint16_t s_lut[2][256];  // two samples per source pixel, by line parity
-const uint8_t* const* volatile s_src;
-volatile int s_srcW, s_srcH;
+uint8_t s_lumHi[256], s_lumLo[256];  // brightness of the bytes of a 16-bit pixel
+Src s_srcSlot[2];
+const Src* volatile s_src;  // switched atomically between the two slots
+uint32_t s_bufGen[kBufs];
 int s_line;
 Desc* s_desc;
 uint32_t s_regStatus, s_regClear, s_regDesc;
@@ -115,6 +131,7 @@ uint32_t s_produced, s_dmaLines, s_lastDesc;
 
 // ---- control ----
 uint8_t s_luma[256];
+uint8_t s_srcFormat = 0xFF;
 int s_mode = TVOUT_OFF;
 bool s_supported;
 volatile bool s_lcdDirty;
@@ -156,30 +173,59 @@ void IRAM_ATTR renderLine(int b) {
     s_bufType[b] = T_BLANK;
   }
 
-  const uint8_t* const* src = s_src;
-  const int h = s_srcH;
-  const int y = line - s_std.top - ((kActiveLines - h) >> 1);
-  if (!src || static_cast<unsigned>(y) >= static_cast<unsigned>(h)) {
+  const Src* src = s_src;
+  int y = src ? line - s_std.top - src->ty : -1;
+  if (src && src->v == 2) y >>= 1;
+  if (!src || y < 0 || y >= src->h) {
     if (s_bufType[b] == T_ACTIVE) {
       fillWords(reinterpret_cast<uint32_t*>(d + s_std.x0), kBlack4, kActiveSamples / 4);
       s_bufType[b] = T_BLANK;
     }
     return;
   }
-
-  const int w = s_srcW;
-  const uint8_t* p = src[y];
-  uint16_t* o = reinterpret_cast<uint16_t*>(d + s_std.x0 + ((kActiveSamples - 2 * w) >> 1));
-  const uint16_t* lut = s_lut[line & 1];
-  int x = 0;
-  for (; x + 4 <= w; x += 4) {
-    o[x] = lut[p[x]];
-    o[x + 1] = lut[p[x + 1]];
-    o[x + 2] = lut[p[x + 2]];
-    o[x + 3] = lut[p[x + 3]];
+  if (s_bufType[b] == T_ACTIVE && s_bufGen[b] != src->gen) {
+    fillWords(reinterpret_cast<uint32_t*>(d + s_std.x0), kBlack4, kActiveSamples / 4);
   }
-  for (; x < w; ++x) o[x] = lut[p[x]];
+  s_bufGen[b] = src->gen;
   s_bufType[b] = T_ACTIVE;
+
+  const uint16_t* lut = s_lut[line & 1];
+  const uint8_t* p = src->base + y * src->pitch;
+  const uint16_t* p16 = reinterpret_cast<const uint16_t*>(p);
+  uint8_t* o = d + s_std.x0 + src->ox;
+  const int w = src->w;
+  const int step = src->step;
+
+// Pixel x shown -> two samples (left in the low byte).
+#define TV_PIX8(x) lut[p[(x)*step]]
+#define TV_PIX16(x) lut[s_lumHi[p16[(x)*step] >> 8] + s_lumLo[p16[(x)*step] & 0xFF]]
+#define TV_ROW(PIX)                                                          \
+  switch (src->k) {                                                          \
+    case 2: {                                                                \
+      uint16_t* o16 = reinterpret_cast<uint16_t*>(o);                        \
+      for (int x = 0; x < w; ++x) o16[x] = PIX(x);                           \
+      break;                                                                 \
+    }                                                                        \
+    case 3:                                                                  \
+      for (int x = 0; x < w; ++x, o += 3) {                                  \
+        const uint16_t q = PIX(x);                                           \
+        o[0] = q; o[1] = q >> 8; o[2] = q;                                   \
+      }                                                                      \
+      break;                                                                 \
+    default:                                                                 \
+      for (int x = 0; x < w; ++x) {                                          \
+        const uint16_t q = PIX(x);                                           \
+        o[x] = (x & 1) ? (q >> 8) : q;                                       \
+      }                                                                      \
+  }
+  if (src->wide) {
+    TV_ROW(TV_PIX16)
+  } else {
+    TV_ROW(TV_PIX8)
+  }
+#undef TV_ROW
+#undef TV_PIX16
+#undef TV_PIX8
 }
 
 // GDMA "descriptor done": refill the buffers the DMA has finished with.
@@ -347,6 +393,7 @@ bool startHw() {
   for (int i = 0; i < kBufs; ++i) {
     memcpy(s_buf[i], blank, kBufBytes);
     s_bufType[i] = T_BLANK;
+    s_bufGen[i] = 0;
     renderLine(i);
     s_desc[i].dw0 = (1u << 31) | (static_cast<uint32_t>(s_std.len) << 12) | kBufBytes;
     s_desc[i].buf = s_buf[i];
@@ -407,19 +454,91 @@ void tvout_cycle_mode(void) {
   if (s_supported) setMode((s_mode + 1) % TVOUT_MODES, true);
 }
 
-void tvout_set_source8(const uint8_t* const* lines, int width, int height) {
-  if (width > kActiveSamples / 2) width = kActiveSamples / 2;
-  width &= ~1;  // keeps the 16-bit stores aligned
-  if (height > kActiveLines) height = kActiveLines;
-  s_srcW = width;
-  s_srcH = height;
-  s_src = lines;
+void tvout_set_source(const tvout_source_t* in) {
+  static uint32_t gen = 1;
+  if (!in || !in->base || in->width <= 0 || in->height <= 0) {
+    s_src = nullptr;
+    return;
+  }
+  const Src* cur = s_src;
+  Src& n = s_srcSlot[cur == &s_srcSlot[0] ? 1 : 0];
+  const int bpp = in->format == TVOUT_FMT_INDEX8 ? 1 : 2;
+  n.wide = bpp == 2;
+  n.k = in->xscale < 1 ? 1 : in->xscale > 3 ? 3 : in->xscale;
+  n.v = in->yscale == 2 ? 2 : 1;
+  n.step = in->xstep == 2 ? 2 : 1;
+  n.pitch = in->pitch;
+  // Crop what does not fit (centred), then centre what is left.
+  int w = in->width / n.step;
+  int h = in->height;
+  const int maxW = kActiveSamples / n.k, maxH = kActiveLines / n.v;
+  const int cx = w > maxW ? (w - maxW) / 2 : 0;
+  const int cy = h > maxH ? (h - maxH) / 2 : 0;
+  if (w > maxW) w = maxW;
+  if (h > maxH) h = maxH;
+  n.w = w;
+  n.h = h;
+  n.base = static_cast<const uint8_t*>(in->base) + cy * in->pitch + cx * n.step * bpp;
+  n.ox = ((kActiveSamples - n.k * w) / 2) & ~1;
+  n.ty = (kActiveLines - n.v * h) / 2;
+  const bool same = cur && cur->pitch == n.pitch && cur->w == n.w && cur->h == n.h
+                    && cur->ox == n.ox && cur->ty == n.ty && cur->k == n.k && cur->v == n.v
+                    && cur->step == n.step && cur->wide == n.wide;
+  if (same && cur->base == n.base) return;
+  n.gen = same ? cur->gen : ++gen;
+
+  if (in->format != s_srcFormat) {
+    s_srcFormat = in->format;
+    // 16-bit pixels: brightness = table(high byte) + table(low byte), each
+    // part of R, G and B being a linear term. The level table is then
+    // indexed by brightness.
+    for (int i = 0; i < 256; ++i) {
+      int hi = 0, lo = 0;  // x 256
+      switch (in->format) {
+        case TVOUT_FMT_RGB565:          // hi RRRRRGGG, lo GGGBBBBB
+        case TVOUT_FMT_RGB565_SWAPPED:  // bytes exchanged in memory
+          hi = 77 * ((i >> 3) * 255 / 31) + 150 * (((i & 7) << 3) * 255 / 63);
+          lo = 150 * ((i >> 5) * 255 / 63) + 29 * ((i & 31) * 255 / 31);
+          break;
+        case TVOUT_FMT_BGR444:  // hi 0000BBBB, lo GGGGRRRR
+          hi = 29 * ((i & 15) * 17);
+          lo = 150 * ((i >> 4) * 17) + 77 * ((i & 15) * 17);
+          break;
+      }
+      if (in->format == TVOUT_FMT_RGB565_SWAPPED) {
+        s_lumLo[i] = hi >> 8;
+        s_lumHi[i] = lo >> 8;
+      } else {
+        s_lumHi[i] = hi >> 8;
+        s_lumLo[i] = lo >> 8;
+      }
+    }
+    if (n.wide) {
+      for (int i = 0; i < 256; ++i) s_luma[i] = i;
+      buildLut();
+    }
+  }
+  s_src = &n;
+}
+
+void tvout_set_luma_rgb(int index, uint8_t r, uint8_t g, uint8_t b) {
+  tvout_set_luma(index, static_cast<uint8_t>((77 * r + 150 * g + 29 * b) >> 8));
+}
+
+void tvout_set_palette565(const uint16_t* palette, int count, int swapped) {
+  for (int i = 0; i < count && i < 256; ++i) {
+    uint16_t c = palette[i];
+    if (swapped) c = static_cast<uint16_t>(c << 8 | c >> 8);
+    tvout_set_luma_rgb(i, ((c >> 11) & 31) * 255 / 31, ((c >> 5) & 63) * 255 / 63, (c & 31) * 255 / 31);
+  }
 }
 
 void tvout_set_luma(int index, uint8_t luma) {
   s_luma[index & 255] = luma;
   lutEntry(index & 255);
 }
+
+int tvout_lcd_wants_frames(void) { return s_mode == TVOUT_OFF || s_lcdDirty; }
 
 int tvout_lcd_hook(void) {
   if (s_lcdDirty) {

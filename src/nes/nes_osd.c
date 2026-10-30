@@ -103,7 +103,7 @@ static void set_palette(rgb_t *pal)
     for (i = 0; i < 256; i++) {
         uint16 c = (pal[i].b >> 3) + ((pal[i].g >> 2) << 5) + ((pal[i].r >> 3) << 11);
         myPalette[i] = (uint16)((c >> 8) | ((c & 0xff) << 8));
-        tvout_set_luma(i, (uint8_t)((77 * pal[i].r + 150 * pal[i].g + 29 * pal[i].b) >> 8));
+        tvout_set_luma_rgb(i, pal[i].r, pal[i].g, pal[i].b);
     }
 }
 
@@ -128,7 +128,11 @@ static bitmap_t *lock_write(void)
         myBitmap = bmp_createhw((uint8 *)fb, FB_WIDTH, FB_HEIGHT, FB_WIDTH);
         if (!myBitmap) { nofrendo_log_printf("OSD: bmp_createhw FAILED\n"); return NULL; }
 
-        tvout_set_source8((const uint8_t *const *)myBitmap->line, NES_SCREEN_WIDTH, VISIBLE_H);
+        {
+            tvout_source_t src = { fb, FB_WIDTH, NES_SCREEN_WIDTH, VISIBLE_H,
+                                   TVOUT_FMT_INDEX8, 2, 1, 1 };
+            tvout_set_source(&src);
+        }
         nofrendo_log_printf("OSD: lock_write -> bmp %p\n", (void*)myBitmap);
     }
     return myBitmap; /* reuse */

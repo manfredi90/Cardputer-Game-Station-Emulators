@@ -56,7 +56,7 @@ The built-in **Cardputer keyboard** is used for all controls:
 | 🔍 Zoom − | **Fn + ←** | Zoom out |
 | 🔍 Zoom + | **Fn + →**| Zoom in |
 | 🔘 Quit Game | **G0 (hold 1 s)** | Go back to menu |
-| 📺 TV Output | **T** | Cycle composite video mode (NES, Cardputer ADV) |
+| 📺 TV Output | **T** | Cycle composite video mode (Cardputer ADV) |
 
 > The `j` key is also bound as Button A to allow an alternative layout for player preference.
 
@@ -66,7 +66,7 @@ The built-in **Cardputer keyboard** is used for all controls:
 
 ## TV Output (Composite Video)
 
-On the **Cardputer ADV**, the NES emulator can send the picture to a TV with a
+On the **Cardputer ADV**, the emulators can send the picture to a TV with a
 composite (RCA) input, in 240p PAL (50 Hz) or NTSC (60 Hz). The ESP32-S3 has
 no DAC, so the signal comes from GPIOs and a few resistors on the EXT header:
 
@@ -89,7 +89,20 @@ NTSC mono. The mode is saved. While the TV is on, the built-in screen shows
 the current mode instead of the game.
 
 The picture is drawn straight from the emulator's frame buffer, with no extra
-frame buffer (about 5 KB of RAM while the TV is on).
+frame buffer (about 5 KB of RAM while the TV is on). Pixels are scaled by whole
+numbers only, so they all have the same size:
+
+| Console | Picture on the TV |
+|---|---|
+| NES, Master System, SG-1000, ColecoVision, MSX | ×2 |
+| Game Gear, Game Boy / Color, Neo Geo Pocket, WonderSwan | ×2, centred |
+| PC Engine | ×2 (wider modes: every other pixel ×3) |
+| Atari 2600 | ×3 |
+| Atari 7800 | every other pixel ×3 (the common 160-pixel modes) |
+| Lynx | ×3, double lines |
+
+Not available for Mega Drive, Super NES, GX4000 and MSX2 games: these cores
+draw line by line and keep no frame in memory.
 > Not available on the original Cardputer: its keyboard uses the same GPIOs.
 
 ## M5Stack Joystick

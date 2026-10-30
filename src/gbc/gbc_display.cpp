@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <M5Cardputer.h>
 #include "esp_heap_caps.h"
+#include "share/tv_out.h"
 #include <math.h>
 extern "C" {
   #include "gnuboy/gnuboy.h"
@@ -156,6 +157,7 @@ static void gbc_display_task(void *arg)
     if (!msg.fb || msg.width <= 0 || msg.height <= 0 || msg.pitch <= 0) {
       continue;
     }
+    if (tvout_lcd_hook()) continue;  // the TV shows the frame
 
     int srcW  = msg.width;
     int srcH  = msg.height;
@@ -230,6 +232,7 @@ extern "C" void gbc_display_init(void)
 {
   M5Cardputer.Display.setSwapBytes(true);
   M5Cardputer.Display.fillScreen(TFT_BLACK);
+  tvout_init();
 
   if (!s_frameQ) {
     s_frameQ = xQueueCreate(2, sizeof(GbcFrameMsg));  // 2 frames max 
@@ -287,6 +290,11 @@ extern "C" void gbc_display_submit_frame(const uint16_t *fb,
                                          int height)
 {
   if (!s_frameQ || !fb) return;
+
+  // TV: 160x144 RGB565 x2
+  tvout_source_t tv = { fb, pitch * 2, width, height, TVOUT_FMT_RGB565, 2, 1, 1 };
+  tvout_set_source(&tv);
+  if (!tvout_lcd_wants_frames()) return;
 
   GbcFrameMsg msg;
   msg.fb     = fb;
