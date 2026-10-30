@@ -36,6 +36,8 @@
 #define CARDPUTER_BRIGHT_UP         ']'     // Bright +
 #define CARDPUTER_BRIGHT_DOWN       '['     // Bright -
 
+#define CARDPUTER_TV_MODE           't'     // TV out mode (composite video)
+
 extern uint32_t lastPadState;
 
 namespace share

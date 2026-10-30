@@ -56,12 +56,41 @@ The built-in **Cardputer keyboard** is used for all controls:
 | 🔍 Zoom − | **Fn + ←** | Zoom out |
 | 🔍 Zoom + | **Fn + →**| Zoom in |
 | 🔘 Quit Game | **G0 (hold 1 s)** | Go back to menu |
+| 📺 TV Output | **T** | Cycle composite video mode (NES, Cardputer ADV) |
 
 > The `j` key is also bound as Button A to allow an alternative layout for player preference.
 
 > The `z` key is also bound as Arrow Down to allow the use of a D-PAD.
 
 > On the MSX emulator, press `FN+key` to type normal keyboard keys instead of joystick inputs.
+
+## TV Output (Composite Video)
+
+On the **Cardputer ADV**, the NES emulator can send the picture to a TV with a
+composite (RCA) input, in 240p PAL (50 Hz) or NTSC (60 Hz). The ESP32-S3 has
+no DAC, so the signal comes from GPIOs and a few resistors on the EXT header:
+
+```
+ G5 ──[ 270 Ω ]──┐
+ G6 ──[ 560 Ω ]──┼────► RCA centre pin (video)
+ G3 ──[ 1.1 kΩ ]─┘
+ GND ─────────────────► RCA shield
+```
+
+- **6 grey levels** need all three resistors.
+- **Black and white** needs only G5 and G6 (220 Ω or 270 Ω on G5). Greys are
+  shown with a dither pattern.
+
+Use 1 % resistors for even grey steps. Remove any cap plugged into the EXT
+header.
+
+Press **`T`** during a game to cycle: off → PAL grey → NTSC grey → PAL mono →
+NTSC mono. The mode is saved. While the TV is on, the built-in screen shows
+the current mode instead of the game.
+
+The picture is drawn straight from the emulator's frame buffer, with no extra
+frame buffer (about 5 KB of RAM while the TV is on).
+> Not available on the original Cardputer: its keyboard uses the same GPIOs.
 
 ## M5Stack Joystick
 

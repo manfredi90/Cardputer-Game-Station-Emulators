@@ -5,6 +5,7 @@
 #include <esp_system.h>
 #include "game_save.h"
 #include <Preferences.h>
+#include "tv_out.h"
 
 static uint32_t s_lastInputUs = 0;
 uint32_t lastPadState = 0xFFFFFFFF;
@@ -63,6 +64,11 @@ namespace share
             }
             
             esp_restart();
+        }
+
+        // TV out: next mode (only in cores with TV support)
+        if (M5Cardputer.Keyboard.isChange() && !status.fn && key(CARDPUTER_TV_MODE)) {
+            tvout_cycle_mode();
         }
 
         // Volume +

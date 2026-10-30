@@ -29,6 +29,8 @@
 #include <nofconfig.h>
 #include <osd.h>
 
+#include "share/tv_out.h"
+
 #define HW_AUDIO_SAMPLERATE 22050
 #define NTSC
 
@@ -101,6 +103,7 @@ static void set_palette(rgb_t *pal)
     for (i = 0; i < 256; i++) {
         uint16 c = (pal[i].b >> 3) + ((pal[i].g >> 2) << 5) + ((pal[i].r >> 3) << 11);
         myPalette[i] = (uint16)((c >> 8) | ((c & 0xff) << 8));
+        tvout_set_luma(i, (uint8_t)((77 * pal[i].r + 150 * pal[i].g + 29 * pal[i].b) >> 8));
     }
 }
 
@@ -125,6 +128,7 @@ static bitmap_t *lock_write(void)
         myBitmap = bmp_createhw((uint8 *)fb, FB_WIDTH, FB_HEIGHT, FB_WIDTH);
         if (!myBitmap) { nofrendo_log_printf("OSD: bmp_createhw FAILED\n"); return NULL; }
 
+        tvout_set_source8((const uint8_t *const *)myBitmap->line, NES_SCREEN_WIDTH, VISIBLE_H);
         nofrendo_log_printf("OSD: lock_write -> bmp %p\n", (void*)myBitmap);
     }
     return myBitmap; /* reuse */
@@ -209,6 +213,7 @@ int osd_init(void)
     if (osd_init_sound()) return -1;
 
     display_init();
+    tvout_init();
     vidQueue = xQueueCreate(2, sizeof(bitmap_t *));
     xTaskCreatePinnedToCore(&displayTask, "displayTask", 4096, NULL, 3, NULL, 0);
     osd_initinput();

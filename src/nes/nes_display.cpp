@@ -5,6 +5,7 @@ extern "C" {
 }
 
 #include <M5Unified.h>
+#include "share/tv_out.h"
 
 int16_t frame_scaling;
 static uint16_t* s_nesLineBuf = nullptr;
@@ -131,6 +132,7 @@ void display_write_frame_zoom(const uint8_t *data[]) {
 }
 
 void display_write_frame(const uint8_t *data[]) {
+    if (tvout_lcd_hook()) return;  // the TV shows the frame
     if (!fullscreenMode) {
         display_write_frame_square(data);
         return;
