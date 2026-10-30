@@ -118,7 +118,7 @@ You can precisely adjust the display zoom level with `fn` + `arrows left/right`.
 
 ## About Games
 
-You can place the **ROM uncompressed files** anywhere on your SD card and select them. The firmware allows running ROMs up to 5.5 MB.
+You can place the **ROM uncompressed files** anywhere on your SD card and select them. The firmware allows running ROMs up to 5.3 MB.
 
 > **⚠️ Avoid having more than 512 ROMs per folder** to prevent loading times.
 
