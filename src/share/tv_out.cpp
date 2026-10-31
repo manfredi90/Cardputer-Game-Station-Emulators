@@ -27,6 +27,7 @@
 
 #include <driver/gpio.h>
 #include <esp_heap_caps.h>
+#include <esp_timer.h>
 #include <esp_intr_alloc.h>
 #include <esp_private/gdma.h>
 #include <esp_rom_gpio.h>
@@ -226,6 +227,18 @@ int s_xoff, s_yoff;
 int s_mode = TVOUT_OFF;      // what is running: TVOUT_OFF or s_std
 float s_fps;                 // frame rate of the game (0: unknown)
 uint32_t s_lastWake;
+
+// Frame lock statistics, shown on the LCD once a second: time the game
+// takes per frame (between two tvout_frame_sync calls) and late frames.
+struct Stats {
+  int64_t frameStart, periodStart, sum, max;
+  uint32_t frames, late;
+} s_stats;
+struct Shown {
+  volatile bool ready;
+  float fps, avgMs, maxMs;
+  uint32_t late;
+} s_shown;
 
 // ---- control ----
 uint8_t s_luma[256];
@@ -981,20 +994,50 @@ int tvout_frame_sync(float fps) {
     s_fps = fps;
     if (s_mode != TVOUT_OFF && !s_menuOpen) restart();
   }
-  if (s_mode == TVOUT_OFF || s_menuOpen || !s_chan) return 0;
+  if (s_mode == TVOUT_OFF || s_menuOpen || !s_chan) {
+    s_stats.frameStart = 0;
+    return 0;
+  }
   if (fabsf(s_g.field / fps - 1.0f) > 0.005f) return 0;  // rates too different
+
+  // statistics
+  Stats& st = s_stats;
+  const int64_t now = esp_timer_get_time();
+  if (st.frameStart) {
+    const int64_t busy = now - st.frameStart;
+    st.sum += busy;
+    if (busy > st.max) st.max = busy;
+    ++st.frames;
+  }
+  if (now - st.periodStart >= 1000000) {
+    if (st.frames && !s_shown.ready) {
+      s_shown.fps = st.frames * 1e6f / (now - st.periodStart);
+      s_shown.avgMs = st.sum / 1000.0f / st.frames;
+      s_shown.maxMs = st.max / 1000.0f;
+      s_shown.late = st.late;
+      s_shown.ready = true;
+    }
+    st.periodStart = now;
+    st.sum = st.max = 0;
+    st.frames = st.late = 0;
+  }
+
+  int result = 1;
   const uint32_t c = s_wakeCount;
   if (c != s_lastWake) {  // the TV already passed the wake line: late, go on
     s_lastWake = c;
-    return 2;
+    result = 2;
+    ++st.late;
+  } else {
+    s_waitTask = xTaskGetCurrentTaskHandle();
+    while (s_wakeCount == c) {
+      if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(40)) == 0) break;  // safety timeout
+    }
+    s_waitTask = nullptr;
+    s_lastWake = s_wakeCount;
   }
-  s_waitTask = xTaskGetCurrentTaskHandle();
-  while (s_wakeCount == c) {
-    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(40)) == 0) break;  // safety timeout
-  }
-  s_waitTask = nullptr;
-  s_lastWake = s_wakeCount;
-  return 1;
+  st.frameStart = esp_timer_get_time();
+  return result;
 }
 
 void tvout_set_source(const tvout_source_t* in) {
@@ -1048,6 +1091,19 @@ int tvout_lcd_hook(void) {
       lcd.drawCenterString("T: off   Fn+T: menu", lcd.width() / 2, lcd.height() / 2 + 14);
       lcd.setFont(&fonts::Font0);
     }
+  }
+  if (s_mode != TVOUT_OFF && s_shown.ready) {
+    // frame lock statistics, bottom line
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%.1f fps  %.1f ms  max %.1f  late %lu", s_shown.fps, s_shown.avgMs,
+             s_shown.maxMs, static_cast<unsigned long>(s_shown.late));
+    s_shown.ready = false;
+    auto& lcd = M5Cardputer.Display;
+    resetText();
+    lcd.setFont(&fonts::Font0);
+    lcd.fillRect(0, lcd.height() - 12, lcd.width(), 12, TFT_BLACK);
+    lcd.setTextColor(0x8410, TFT_BLACK);
+    lcd.drawCenterString(buf, lcd.width() / 2, lcd.height() - 10);
   }
   return s_mode != TVOUT_OFF;
 }
