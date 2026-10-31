@@ -369,10 +369,14 @@ static void system_video(bool draw)
    osd_getinput();
 }
 
+/* TV output: frame pacing locked to the TV (see osd_tv_sync) */
+extern int osd_tv_sync(void);
+
 /* main emulation loop */
 void nes_emulate(void)
 {
    int last_ticks, frames_to_render;
+   int tv_state = 0; /* 0: timer, 1: TV, on time, 2: TV, last frame late */
 
    osd_setsound(nes.apu->process);
 
@@ -383,6 +387,20 @@ void nes_emulate(void)
 
    while (false == nes.poweroff)
    {
+      if (0 != tv_state && false == nes.pause)
+      {
+         /* Locked to the TV: it starts each frame. After a late frame the
+            next one starts while the TV shows the picture: run it without
+            drawing (like the auto frame skip), so the picture stays whole. */
+         bool draw = (1 == tv_state);
+         nes_renderframe(draw);
+         system_video(draw);
+         tv_state = osd_tv_sync();
+         last_ticks = nofrendo_ticks;
+         frames_to_render = 0;
+         continue;
+      }
+
       if (nofrendo_ticks != last_ticks)
       {
          int tick_diff = nofrendo_ticks - last_ticks;
@@ -403,12 +421,14 @@ void nes_emulate(void)
          frames_to_render--;
          nes_renderframe(false);
          system_video(false);
+         tv_state = osd_tv_sync();
       }
       else if ((1 == frames_to_render && true == nes.autoframeskip) || false == nes.autoframeskip)
       {
          frames_to_render = 0;
          nes_renderframe(true);
          system_video(true);
+         tv_state = osd_tv_sync();
       }
    }
 }

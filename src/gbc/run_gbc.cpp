@@ -145,9 +145,9 @@ void run_gbc(const uint8_t* romData, size_t romLen, const char* romPathOrName) {
         }
 
         // Pacing (locked to the TV when it is on)
-        if (tvout_frame_sync((float)targetFps)) {
+        if (const int tv = tvout_frame_sync((float)targetFps)) {
             next_frame_us = esp_timer_get_time();
-            drawFrame = true;
+            drawFrame = (tv == 1);  // after a late frame: do not draw the next one
             continue;
         }
         next_frame_us += frame_us;

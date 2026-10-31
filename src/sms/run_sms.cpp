@@ -126,6 +126,7 @@ void run_sms(const uint8_t* romPtr, size_t romLen, SmsConsoleMode mode, const ch
 
   // Main loop
   bool lastToggle = fullscreen;
+  int tvState = 0;  // 2: the last frame was late on the TV
   uint32_t frameCount = 0;
   uint32_t lastFpsTime = millis();
   float avgFrameTime = 0;
@@ -137,7 +138,7 @@ void run_sms(const uint8_t* romPtr, size_t romLen, SmsConsoleMode mode, const ch
     uint32_t t0 = micros();
 
     sms_save_tick();
-    sms_frame(0);
+    sms_frame(tvState == 2);  // after a late frame: emulate without drawing
     if (lastToggle != fullscreen) {
       lastToggle = fullscreen;
       if (fullscreen) video_compute_scaler_full();
@@ -149,7 +150,8 @@ void run_sms(const uint8_t* romPtr, size_t romLen, SmsConsoleMode mode, const ch
     // Pacing 60 Hz (locked to the TV when it is on)
     uint32_t emuUs = micros() - t0;
     int32_t remaining = TARGET_US - emuUs;
-    if (!tvout_frame_sync(1000000.0f / TARGET_US) && remaining > 0) {
+    tvState = tvout_frame_sync(1000000.0f / TARGET_US);
+    if (!tvState && remaining > 0) {
       delayMicroseconds(remaining);
     }
     

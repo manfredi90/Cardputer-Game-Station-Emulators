@@ -129,10 +129,10 @@ void run_a7800(const uint8_t* romData, size_t romLen, const char* romName)
             lastLogMs = nowMs;
         }
 
-        if (tvout_frame_sync((float)(targetFps > 0.0 ? targetFps : 60.0))) {  // locked to the TV
+        if (const int tv = tvout_frame_sync((float)(targetFps > 0.0 ? targetFps : 60.0))) {  // locked to the TV
             nextFrameUs = esp_timer_get_time();
-            skipNextVideo = false;
-            consecSkips = 0;
+            skipNextVideo = (tv == 2) && consecSkips < kRenderFloor;  // late: skip drawing the next frame
+            consecSkips = skipNextVideo ? consecSkips + 1 : 0;
             continue;
         }
         nextFrameUs += frameUs;

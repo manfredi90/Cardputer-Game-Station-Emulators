@@ -78,8 +78,11 @@ int tvout_lcd_hook(void);
 // core's frame rate. While the TV is on and the rate is close to the
 // standard's, the TV field rate is tuned to it and the call waits until the
 // TV has shown the last line of the picture: the next frame is then written
-// ahead of the beam. Returns 1 when the core must skip its own wait (and
-// restart its timing from now), 0 when it paces itself as usual.
+// ahead of the beam. Returns 0 when the core paces itself as usual, else the
+// core must skip its own wait (and restart its timing from now): 1 = on time,
+// 2 = the frame was late (the call did not wait); the next frame should then
+// be emulated without drawing it, if the core can, since it starts while the
+// TV is showing the picture.
 int tvout_frame_sync(float fps);
 
 // For cores that copy or queue frames for the LCD task: 0 while the TV is on

@@ -120,9 +120,11 @@ Geo makeGeo(bool ntsc, int clk, int xoff, int yoff, Range* range, float fps = 0)
   const float nominal = f * 1e6f / (static_cast<float>(g.len) * g.lines);
   if (fps > 0 && fabsf(fps / nominal - 1.0f) < kTuneRange) {
     // Closest field rate, staying near the standard line count and length.
+    // Lines are only added, never removed: the blanking between two
+    // pictures is the time the game has to start its next frame.
     const int len0 = g.len, lines0 = g.lines;
     float bestErr = 1e9f;
-    for (int lines = lines0 - 12; lines <= lines0 + 12; ++lines) {
+    for (int lines = lines0; lines <= lines0 + 12; ++lines) {
       for (int len = len0 - 6; len <= len0 + 6 && len <= kBufBytes; ++len) {
         const float err = fabsf(f * 1e6f / (static_cast<float>(len) * lines) - fps)
                           + 1e-5f * (abs(lines - lines0) + abs(len - len0));
@@ -206,8 +208,8 @@ const Src* volatile s_src;  // switched between the two slots
 volatile bool s_test;       // calibration picture instead of the game
 uint8_t s_white = 7;
 int s_line;
-// Frame lock: at the line after the end of the picture, the waiting
-// emulator task is woken to start the next frame.
+// Frame lock: shortly before the end of the picture, the waiting emulator
+// task is woken to start the next frame (see applySource).
 int s_wakeLine;
 volatile uint32_t s_wakeCount;
 TaskHandle_t volatile s_waitTask;
@@ -497,8 +499,14 @@ void applySource() {
     n.gen = same ? cur->gen : ++gen;
     s_src = &n;
   }
-  // wake the game when the TV has shown the last line of its picture
-  int wake = s_g.top + n.ty + n.v * n.h;
+  // Wake the game shortly before the TV has shown the last line of its
+  // picture. The game rewrites its picture from the top, so it stays behind
+  // the beam of the field being shown as long as it takes more than about
+  // (early - v) x 64 us / h per source line (10-20 us: far faster than any
+  // core), and it gains that much time to stay ahead of the next field.
+  int early = n.v * n.h / 4;
+  if (early > 32) early = 32;
+  int wake = s_g.top + n.ty + n.v * n.h - early;
   if (wake >= s_g.lines) wake -= s_g.lines;
   s_wakeLine = wake;
   portEXIT_CRITICAL(&s_srcMux);
@@ -976,9 +984,9 @@ int tvout_frame_sync(float fps) {
   if (s_mode == TVOUT_OFF || s_menuOpen || !s_chan) return 0;
   if (fabsf(s_g.field / fps - 1.0f) > 0.005f) return 0;  // rates too different
   const uint32_t c = s_wakeCount;
-  if (c != s_lastWake) {  // the TV already passed the picture: late, go on
+  if (c != s_lastWake) {  // the TV already passed the wake line: late, go on
     s_lastWake = c;
-    return 1;
+    return 2;
   }
   s_waitTask = xTaskGetCurrentTaskHandle();
   while (s_wakeCount == c) {
