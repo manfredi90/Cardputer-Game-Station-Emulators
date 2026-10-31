@@ -11,8 +11,10 @@
 //   G6 --[ 560 R ]--+----> RCA centre (video)     GND ----> RCA shield
 //   G3 --[ 1.1 k ]--+      (G3 only for 6 greys; mono also works with 220 R on G5)
 //
-// The T key cycles OFF -> PAL grey -> NTSC grey -> PAL mono -> NTSC mono.
-// The mode is saved and restored the next time a core with TV support starts.
+// T switches the output on and off. Fn+T opens a menu on the LCD: standard
+// (PAL / NTSC), picture (6 greys / black and white) and calibration
+// (position, and width through five sample clocks with an integer divider).
+// The settings are saved and restored when a core with TV support starts.
 
 #include <stdint.h>
 
@@ -29,10 +31,16 @@ enum {
   TVOUT_MODES
 };
 
-// Enables TV support for the running core and restores the saved mode.
+// Enables TV support for the running core and restores the saved settings.
 void tvout_init(void);
+// TVOUT_OFF, or the running standard.
 int tvout_mode(void);
-void tvout_cycle_mode(void);
+// T key: output on / off (does nothing in cores without TV support).
+void tvout_toggle(void);
+// Fn+T: settings menu on the LCD; returns when it is closed. The calling
+// task (the core's input polling) is blocked meanwhile, which pauses most
+// cores; the speaker is muted.
+void tvout_menu(void);
 
 enum {
   TVOUT_FMT_INDEX8 = 0,       // 8-bit palette index (brightness from tvout_set_luma*)

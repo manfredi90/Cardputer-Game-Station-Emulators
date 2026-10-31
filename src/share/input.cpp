@@ -66,9 +66,13 @@ namespace share
             esp_restart();
         }
 
-        // TV out: next mode (only in cores with TV support)
-        if (M5Cardputer.Keyboard.isChange() && !status.fn && key(CARDPUTER_TV_MODE)) {
-            tvout_cycle_mode();
+        // TV out (only in cores with TV support): T on/off, Fn+T menu
+        if (M5Cardputer.Keyboard.isChange() && key(CARDPUTER_TV_MODE)) {
+            if (status.fn) {
+                tvout_menu();
+            } else {
+                tvout_toggle();
+            }
         }
 
         // Volume +

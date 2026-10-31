@@ -36,7 +36,7 @@
 #define CARDPUTER_BRIGHT_UP         ']'     // Bright +
 #define CARDPUTER_BRIGHT_DOWN       '['     // Bright -
 
-#define CARDPUTER_TV_MODE           't'     // TV out mode (composite video)
+#define CARDPUTER_TV_MODE           't'     // TV out on/off, Fn+T: TV menu
 
 extern uint32_t lastPadState;
 

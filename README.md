@@ -56,7 +56,7 @@ The built-in **Cardputer keyboard** is used for all controls:
 | 🔍 Zoom − | **Fn + ←** | Zoom out |
 | 🔍 Zoom + | **Fn + →**| Zoom in |
 | 🔘 Quit Game | **G0 (hold 1 s)** | Go back to menu |
-| 📺 TV Output | **T** | Cycle composite video mode (Cardputer ADV) |
+| 📺 TV Output | **T** / **Fn + T** | TV output on/off / TV menu (Cardputer ADV) |
 
 > The `j` key is also bound as Button A to allow an alternative layout for player preference.
 
@@ -84,9 +84,25 @@ no DAC, so the signal comes from GPIOs and a few resistors on the EXT header:
 Use 1 % resistors for even grey steps. Remove any cap plugged into the EXT
 header.
 
-Press **`T`** during a game to cycle: off → PAL grey → NTSC grey → PAL mono →
-NTSC mono. The mode is saved. While the TV is on, the built-in screen shows
-the current mode instead of the game.
+During a game:
+
+- **`T`** switches the TV output on and off. While it is on, the built-in
+  screen shows the current mode instead of the game.
+- **`Fn` + `T`** opens the TV menu on the built-in screen (the game pauses):
+
+| Item | |
+|---|---|
+| Output | on / off |
+| Standard | PAL 50 Hz / NTSC 60 Hz |
+| Picture | 6 greys / black and white |
+| Calibrate picture | test pattern on the TV: arrows move the picture, `-` makes it narrower, `=` wider |
+| Reset calibration | back to the default position and width |
+
+Menu keys: `;` `.` select, `,` `/` or `Enter` change, `Del` or `Fn`+`T` close.
+The width is chosen among five sample clocks with an integer divider
+(8.89 / 9.23 / 10.00 / 10.91 / 11.43 MHz), so all pixels keep the same
+size; at the two widest settings the edges of 256-pixel pictures are
+cropped. All settings are saved.
 
 The picture is drawn straight from the emulator's frame buffer, with no extra
 frame buffer (about 5 KB of RAM while the TV is on). Pixels are scaled by whole
