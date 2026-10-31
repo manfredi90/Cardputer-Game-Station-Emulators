@@ -16,6 +16,7 @@
 #include "share/game_save.h"
 #include "share/utils.h"
 #include "share/emu_log_cpp.h"
+#include "share/tv_out.h"
 
 static void a7800_request_quit_to_launcher(void)
 {
@@ -128,6 +129,12 @@ void run_a7800(const uint8_t* romData, size_t romLen, const char* romName)
             lastLogMs = nowMs;
         }
 
+        if (tvout_frame_sync((float)(targetFps > 0.0 ? targetFps : 60.0))) {  // locked to the TV
+            nextFrameUs = esp_timer_get_time();
+            skipNextVideo = false;
+            consecSkips = 0;
+            continue;
+        }
         nextFrameUs += frameUs;
         const int64_t nowUs = (int64_t)esp_timer_get_time();
         const int64_t lateness = nowUs - (int64_t)nextFrameUs;

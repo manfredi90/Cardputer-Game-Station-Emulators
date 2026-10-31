@@ -35,6 +35,7 @@
 #define NTSC
 
 TimerHandle_t nes_timer;
+extern volatile int nofrendo_ticks;
 static uint8_t *fb = NULL;       /* framebuffer 8bpp */
 static bitmap_t *myBitmap = NULL;
 bool fullscreenMode = true;
@@ -156,6 +157,14 @@ static void custom_blit(bitmap_t *bmp, int num_dirties, rect_t *dirty_rects)
     }
     do_audio_frame();
     sram_autosave_tick();
+
+    /* Locked to the TV: the TV starts each frame instead of the timer. */
+    if (tvout_frame_sync(60.0f)) {
+        if (nes_timer && xTimerIsTimerActive(nes_timer)) xTimerStop(nes_timer, 0);
+        nofrendo_ticks++;
+    } else if (nes_timer && !xTimerIsTimerActive(nes_timer)) {
+        xTimerStart(nes_timer, 0);
+    }
 }
 
 viddriver_t sdlDriver = {

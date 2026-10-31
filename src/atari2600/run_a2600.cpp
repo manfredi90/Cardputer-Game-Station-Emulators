@@ -238,6 +238,10 @@ void run_a2600(const uint8_t* romData, size_t romLen, const char* romName)
             lastLogMs = nowMs;
         }
 
+        if (tvout_frame_sync(targetFps)) {  // locked to the TV
+            nextFrameUs = esp_timer_get_time();
+            continue;
+        }
         nextFrameUs += frameUs;
         const int64_t nowUs = (int64_t)esp_timer_get_time();
         const int64_t lateness = nowUs - (int64_t)nextFrameUs;

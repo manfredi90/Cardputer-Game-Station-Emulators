@@ -21,6 +21,7 @@
 #include <M5Cardputer.h>
 #include <Preferences.h>
 #include <sdkconfig.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -98,6 +99,7 @@ struct Geo {
   uint16_t top;       // first line of the 240-line active area
   uint16_t clr0;      // word-aligned span that covers the active area
   uint16_t clrWords;
+  float field;        // field rate, Hz
 };
 constexpr int kTopPal = 44, kTopNtsc = 20, kTopMin = 8;
 
@@ -106,11 +108,33 @@ struct Range {
   int xmin, xmax, ymin, ymax;
 };
 
-Geo makeGeo(bool ntsc, int clk, int xoff, int yoff, Range* range) {
+// Field rate within this fraction of the standard: the line count and length
+// are tuned so that a field lasts as long as a frame of the game.
+constexpr float kTuneRange = 0.04f;
+
+Geo makeGeo(bool ntsc, int clk, int xoff, int yoff, Range* range, float fps = 0) {
   const float f = clockHz(clk) / 1e6f;  // samples per microsecond
   Geo g;
   g.len = static_cast<uint16_t>(static_cast<int>((ntsc ? 63.556f : 64.0f) * f + 0.5f) & ~1);
   g.lines = ntsc ? 262 : 312;
+  const float nominal = f * 1e6f / (static_cast<float>(g.len) * g.lines);
+  if (fps > 0 && fabsf(fps / nominal - 1.0f) < kTuneRange) {
+    // Closest field rate, staying near the standard line count and length.
+    const int len0 = g.len, lines0 = g.lines;
+    float bestErr = 1e9f;
+    for (int lines = lines0 - 12; lines <= lines0 + 12; ++lines) {
+      for (int len = len0 - 6; len <= len0 + 6 && len <= kBufBytes; ++len) {
+        const float err = fabsf(f * 1e6f / (static_cast<float>(len) * lines) - fps)
+                          + 1e-5f * (abs(lines - lines0) + abs(len - len0));
+        if (err < bestErr) {
+          bestErr = err;
+          g.len = static_cast<uint16_t>(len);
+          g.lines = static_cast<uint16_t>(lines);
+        }
+      }
+    }
+  }
+  g.field = f * 1e6f / (static_cast<float>(g.len) * g.lines);
   g.half = g.len / 2;
   g.hsync = static_cast<uint16_t>(4.7f * f + 0.5f);
   g.broadLow = g.half - g.hsync;
@@ -182,6 +206,12 @@ const Src* volatile s_src;  // switched between the two slots
 volatile bool s_test;       // calibration picture instead of the game
 uint8_t s_white = 7;
 int s_line;
+// Frame lock: at the line after the end of the picture, the waiting
+// emulator task is woken to start the next frame.
+int s_wakeLine;
+volatile uint32_t s_wakeCount;
+TaskHandle_t volatile s_waitTask;
+BaseType_t s_yield;
 Desc* s_desc;
 uint32_t s_regStatus, s_regClear, s_regDesc;
 uint32_t s_produced, s_dmaLines, s_lastDesc;
@@ -192,6 +222,8 @@ int s_std = TVOUT_PAL_GREY;  // standard and picture when on
 int s_clk = kClockDef;
 int s_xoff, s_yoff;
 int s_mode = TVOUT_OFF;      // what is running: TVOUT_OFF or s_std
+float s_fps;                 // frame rate of the game (0: unknown)
+uint32_t s_lastWake;
 
 // ---- control ----
 uint8_t s_luma[256];
@@ -200,6 +232,7 @@ tvout_source_t s_in;  // last source passed in (reapplied on geometry changes)
 bool s_inValid;
 portMUX_TYPE s_srcMux = portMUX_INITIALIZER_UNLOCKED;
 bool s_supported;
+SemaphoreHandle_t s_hwMutex;
 volatile bool s_lcdDirty;
 volatile bool s_menuOpen;
 gdma_channel_handle_t s_chan;
@@ -257,6 +290,16 @@ void IRAM_ATTR renderLine(int b) {
   uint8_t* d = s_buf[b];
   const int line = s_line;
   s_line = (line + 1 < s_g.lines) ? line + 1 : 0;
+
+  if (line == s_wakeLine) {
+    s_wakeCount = s_wakeCount + 1;
+    TaskHandle_t t = s_waitTask;
+    if (t) {
+      BaseType_t hp = pdFALSE;
+      vTaskNotifyGiveFromISR(t, &hp);
+      s_yield |= hp;
+    }
+  }
 
   if (line < kVsyncLines) {
     if (s_bufType[b] != T_BROAD) {
@@ -352,6 +395,10 @@ void IRAM_ATTR isr(void*) {
     renderLine(s_produced % kBufs);
     ++s_produced;
   }
+  if (s_yield) {
+    s_yield = pdFALSE;
+    portYIELD_FROM_ISR();
+  }
 }
 
 // ---- level tables ----
@@ -384,6 +431,7 @@ void applySource() {
   static uint32_t gen = 1;
   if (!s_inValid) {
     s_src = nullptr;
+    s_wakeLine = 0;
     return;
   }
   const tvout_source_t* in = &s_in;
@@ -449,6 +497,10 @@ void applySource() {
     n.gen = same ? cur->gen : ++gen;
     s_src = &n;
   }
+  // wake the game when the TV has shown the last line of its picture
+  int wake = s_g.top + n.ty + n.v * n.h;
+  if (wake >= s_g.lines) wake -= s_g.lines;
+  s_wakeLine = wake;
   portEXIT_CRITICAL(&s_srcMux);
 }
 
@@ -606,9 +658,10 @@ bool startHw() {
 // Applies the settings: stops the output, recomputes the geometry and the
 // tables, and starts it again when it is on.
 void restart() {
+  if (s_hwMutex) xSemaphoreTake(s_hwMutex, portMAX_DELAY);
   stopHw();
   Range r;
-  s_g = makeGeo(isNtsc(s_std), s_clk, s_xoff, s_yoff, &r);
+  s_g = makeGeo(isNtsc(s_std), s_clk, s_xoff, s_yoff, &r, s_fps);
   // keep the stored offsets inside the range of this standard and clock
   if (s_xoff < r.xmin) s_xoff = r.xmin;
   if (s_xoff > r.xmax) s_xoff = r.xmax;
@@ -627,6 +680,7 @@ void restart() {
     }
   }
   s_lcdDirty = true;
+  if (s_hwMutex) xSemaphoreGive(s_hwMutex);
 }
 
 const char kNs[] = "cardputer_emu";
@@ -750,16 +804,25 @@ bool menuKey(int k) {
   return true;
 }
 
+// The game menu leaves its own text settings (size, centred datum, clip
+// rectangle): reset them before drawing.
+void resetText() {
+  auto& lcd = M5Cardputer.Display;
+  lcd.clearClipRect();
+  lcd.setTextSize(1);
+  lcd.setTextDatum(textdatum_t::top_left);
+  lcd.setTextWrap(false);
+}
+
 void menuDraw() {
   auto& lcd = M5Cardputer.Display;
   const uint16_t bg = TFT_BLACK, fg = TFT_WHITE, dim = 0x8410, hl = 0x0010, accent = 0x07FF;
   char buf[48];
   lcd.startWrite();
+  resetText();
   lcd.fillScreen(bg);
   lcd.setFont(&fonts::Font2);
   if (s_menu.calib) {
-    Range r;
-    makeGeo(isNtsc(s_std), s_clk, s_xoff, s_yoff, &r);
     const uint32_t hz = clockHz(s_clk);
     lcd.setTextColor(accent, bg);
     lcd.drawString("TV calibration", 6, 2);
@@ -799,7 +862,7 @@ void menuDraw() {
     }
     lcd.setFont(&fonts::Font0);
     lcd.setTextColor(dim, bg);
-    lcd.drawString(";.: select  ,/ Enter: change  Del: close", 2, 126);
+    lcd.drawString(";. select   ,/ Enter change   Del close", 4, 126);
   }
   lcd.setFont(&fonts::Font0);
   lcd.endWrite();
@@ -864,6 +927,7 @@ extern "C" {
 
 void tvout_init(void) {
   s_supported = true;
+  if (!s_hwMutex) s_hwMutex = xSemaphoreCreateMutex();
   loadSettings();
   restart();
 }
@@ -904,6 +968,27 @@ void tvout_menu(void) {
   s_menuOpen = false;
 }
 
+int tvout_frame_sync(float fps) {
+  if (fabsf(fps - s_fps) > 0.001f) {  // new rate: tune the field rate to it
+    s_fps = fps;
+    if (s_mode != TVOUT_OFF && !s_menuOpen) restart();
+  }
+  if (s_mode == TVOUT_OFF || s_menuOpen || !s_chan) return 0;
+  if (fabsf(s_g.field / fps - 1.0f) > 0.005f) return 0;  // rates too different
+  const uint32_t c = s_wakeCount;
+  if (c != s_lastWake) {  // the TV already passed the picture: late, go on
+    s_lastWake = c;
+    return 1;
+  }
+  s_waitTask = xTaskGetCurrentTaskHandle();
+  while (s_wakeCount == c) {
+    if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(40)) == 0) break;  // safety timeout
+  }
+  s_waitTask = nullptr;
+  s_lastWake = s_wakeCount;
+  return 1;
+}
+
 void tvout_set_source(const tvout_source_t* in) {
   if (!in || !in->base || in->width <= 0 || in->height <= 0) {
     s_inValid = false;
@@ -942,6 +1027,7 @@ int tvout_lcd_hook(void) {
   if (s_lcdDirty) {
     s_lcdDirty = false;
     auto& lcd = M5Cardputer.Display;
+    resetText();
     lcd.fillScreen(TFT_BLACK);
     if (s_mode != TVOUT_OFF) {
       static const char* const names[TVOUT_MODES] = {"", "PAL, 6 greys", "NTSC, 6 greys",

@@ -73,6 +73,15 @@ void tvout_set_palette565(const uint16_t *palette, int count, int swapped);
 // Call from the task that draws the LCD, before drawing a frame. Returns 1
 // when the TV is on: the caller should skip the LCD (a notice is shown on it).
 int tvout_lcd_hook(void);
+// Frame pacing locked to the TV, against tearing. Call once per frame from the
+// emulation loop, where the core would wait for its next frame, with the
+// core's frame rate. While the TV is on and the rate is close to the
+// standard's, the TV field rate is tuned to it and the call waits until the
+// TV has shown the last line of the picture: the next frame is then written
+// ahead of the beam. Returns 1 when the core must skip its own wait (and
+// restart its timing from now), 0 when it paces itself as usual.
+int tvout_frame_sync(float fps);
+
 // For cores that copy or queue frames for the LCD task: 0 while the TV is on
 // and the LCD has nothing new to show, so that work can be skipped. The
 // source must still be passed to tvout_set_source.

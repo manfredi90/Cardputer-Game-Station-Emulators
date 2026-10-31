@@ -117,6 +117,14 @@ numbers only, so they all have the same size:
 | Atari 7800 | every other pixel ×3 (the common 160-pixel modes) |
 | Lynx | ×3, double lines |
 
+Against tearing, NES, Master System / Game Gear / SG-1000 / ColecoVision,
+Game Boy, Neo Geo Pocket and Atari 2600 / 7800 games are locked to the TV:
+the TV field rate is tuned to the game (for example 60.00 Hz instead of
+60.01) and each frame starts right after the TV has shown the previous one.
+This works when the game and the TV standard match (60 Hz games on NTSC,
+50 Hz games on PAL). PC Engine and MSX (paced by the sound), Lynx and
+WonderSwan (75 Hz) are not locked and may show some tearing.
+
 Not available for Mega Drive, Super NES, GX4000 and MSX2 games: these cores
 draw line by line and keep no frame in memory.
 > Not available on the original Cardputer: its keyboard uses the same GPIOs.

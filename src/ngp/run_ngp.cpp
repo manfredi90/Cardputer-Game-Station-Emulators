@@ -14,6 +14,7 @@
 #include "ngc_save.h"
 // #include "ngc_bios.h"
 #include "share/emu_log_cpp.h"
+#include "share/tv_out.h"
 
 #define NGP_LANG_EN 1
 #define NGP_LANG    NGP_LANG_EN  // 0 = JP, 1 = EN
@@ -235,7 +236,7 @@ void run_ngp(const uint8_t* rom_base, size_t rom_size, const char* rom_name, int
       if (emuUs > frame_time_max) frame_time_max = emuUs;
       
       int32_t remaining = TARGET_US - emuUs;
-      if (remaining > 0) {
+      if (!tvout_frame_sync(1000000.0f / TARGET_US) && remaining > 0) {  // locked to the TV
         delayMicroseconds(remaining);
       }
       

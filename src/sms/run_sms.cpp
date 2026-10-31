@@ -1,6 +1,7 @@
 #pragma GCC optimize ("Os")
 
 #include "run_sms.h"
+#include "share/tv_out.h"
 
 #include <M5Cardputer.h>
 #include <stdio.h>
@@ -145,10 +146,10 @@ void run_sms(const uint8_t* romPtr, size_t romLen, SmsConsoleMode mode, const ch
     cardputer_read_input(mode);
     sms_display_write_frame();
 
-    // Pacing 60 Hz
+    // Pacing 60 Hz (locked to the TV when it is on)
     uint32_t emuUs = micros() - t0;
     int32_t remaining = TARGET_US - emuUs;
-    if (remaining > 0) {
+    if (!tvout_frame_sync(1000000.0f / TARGET_US) && remaining > 0) {
       delayMicroseconds(remaining);
     }
     

@@ -9,6 +9,7 @@ extern "C" {
 #include "gbc_save.h"
 #include "share/utils.h"
 #include "share/emu_log_cpp.h"
+#include "share/tv_out.h"
 
 static uint16_t* s_gbFramebuf = nullptr;
 static int16_t* s_audioBuf = nullptr;
@@ -143,7 +144,12 @@ void run_gbc(const uint8_t* romData, size_t romLen, const char* romPathOrName) {
             lastFpsMs  = nowMs;
         }
 
-        // Pacing
+        // Pacing (locked to the TV when it is on)
+        if (tvout_frame_sync((float)targetFps)) {
+            next_frame_us = esp_timer_get_time();
+            drawFrame = true;
+            continue;
+        }
         next_frame_us += frame_us;
         int64_t now = (int64_t)esp_timer_get_time();
         int64_t lateness = now - (int64_t)next_frame_us;
