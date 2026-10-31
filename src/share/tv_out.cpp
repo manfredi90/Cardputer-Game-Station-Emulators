@@ -230,14 +230,20 @@ uint32_t s_lastWake;
 
 // Frame lock statistics, shown on the LCD once a second: time the game
 // takes per frame (between two tvout_frame_sync calls) and late frames.
+// Cores can also report how long parts of a frame took (tvout_profile).
+constexpr int kSegments = 3;
 struct Stats {
   int64_t frameStart, periodStart, sum, max;
   uint32_t frames, late;
+  int64_t segSum[kSegments], segMax[kSegments];
+  uint32_t segN[kSegments];
 } s_stats;
 struct Shown {
   volatile bool ready;
   float fps, avgMs, maxMs;
   uint32_t late;
+  float segAvg[kSegments], segMax[kSegments];
+  bool seg[kSegments];
 } s_shown;
 
 // ---- control ----
@@ -1015,11 +1021,20 @@ int tvout_frame_sync(float fps) {
       s_shown.avgMs = st.sum / 1000.0f / st.frames;
       s_shown.maxMs = st.max / 1000.0f;
       s_shown.late = st.late;
+      for (int i = 0; i < kSegments; ++i) {
+        s_shown.seg[i] = st.segN[i] != 0;
+        s_shown.segAvg[i] = st.segN[i] ? st.segSum[i] / 1000.0f / st.segN[i] : 0;
+        s_shown.segMax[i] = st.segMax[i] / 1000.0f;
+      }
       s_shown.ready = true;
     }
     st.periodStart = now;
     st.sum = st.max = 0;
     st.frames = st.late = 0;
+    for (int i = 0; i < kSegments; ++i) {
+      st.segSum[i] = st.segMax[i] = 0;
+      st.segN[i] = 0;
+    }
   }
 
   int result = 1;
@@ -1104,8 +1119,30 @@ int tvout_lcd_hook(void) {
     lcd.fillRect(0, lcd.height() - 12, lcd.width(), 12, TFT_BLACK);
     lcd.setTextColor(0x8410, TFT_BLACK);
     lcd.drawCenterString(buf, lcd.width() / 2, lcd.height() - 10);
+    // parts of the frame reported by the core: average / max, ms
+    static const char* const names[kSegments] = {"emu", "snd", "key"};
+    char seg[64];
+    int n = 0;
+    for (int i = 0; i < kSegments; ++i) {
+      if (s_shown.seg[i]) {
+        n += snprintf(seg + n, sizeof(seg) - n, "%s%s %.1f/%.0f", n ? "  " : "", names[i], s_shown.segAvg[i],
+                      s_shown.segMax[i]);
+      }
+    }
+    if (n) {
+      lcd.fillRect(0, lcd.height() - 24, lcd.width(), 12, TFT_BLACK);
+      lcd.drawCenterString(seg, lcd.width() / 2, lcd.height() - 22);
+    }
   }
   return s_mode != TVOUT_OFF;
+}
+
+void tvout_profile(int segment, uint32_t us) {
+  if (segment < 0 || segment >= kSegments || s_mode == TVOUT_OFF) return;
+  Stats& st = s_stats;
+  st.segSum[segment] += us;
+  if (us > st.segMax[segment]) st.segMax[segment] = us;
+  ++st.segN[segment];
 }
 
 }  // extern "C"

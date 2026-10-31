@@ -17,6 +17,7 @@
 #include <esp_heap_caps.h>
 #include "esp_partition.h"
 #include "esp_spi_flash.h"
+#include "esp_timer.h"
 
 /* Nofrendo / OSD headers */
 #include <noftypes.h>
@@ -154,7 +155,11 @@ static void custom_blit(bitmap_t *bmp, int num_dirties, rect_t *dirty_rects)
         bitmap_t *tmp; xQueueReceive(vidQueue, &tmp, 0);
         (void)xQueueSend(vidQueue, &bmp, 0);
     }
-    do_audio_frame();
+    {
+        const int64_t t0 = esp_timer_get_time();
+        do_audio_frame();
+        tvout_profile(1, (uint32_t)(esp_timer_get_time() - t0));
+    }
     sram_autosave_tick();
 }
 
@@ -189,6 +194,7 @@ static void osd_freeinput(void) {}
 
 void osd_getinput(void)
 {
+    const int64_t tKey = esp_timer_get_time();
     const int ev[32] = {
         event_joypad1_up,    event_joypad1_down,  event_joypad1_left,  event_joypad1_right,
         event_joypad1_select,event_joypad1_start, event_joypad1_a,     event_joypad1_b,
@@ -206,6 +212,7 @@ void osd_getinput(void)
         chg >>= 1U;
         b   >>= 1U;
     }
+    tvout_profile(2, (uint32_t)(esp_timer_get_time() - tKey));
 }
 
 void osd_getmouse(int *x, int *y, int *button)

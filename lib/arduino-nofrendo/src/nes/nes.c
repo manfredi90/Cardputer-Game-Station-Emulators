@@ -370,7 +370,9 @@ static void system_video(bool draw)
 }
 
 /* TV output: frame pacing locked to the TV (see osd_tv_sync) */
+#include "esp_timer.h"
 extern int osd_tv_sync(void);
+extern void tvout_profile(int segment, unsigned int us);
 
 /* main emulation loop */
 void nes_emulate(void)
@@ -393,7 +395,9 @@ void nes_emulate(void)
             next one starts while the TV shows the picture: run it without
             drawing (like the auto frame skip), so the picture stays whole. */
          bool draw = (1 == tv_state);
+         const int64_t t0 = esp_timer_get_time();
          nes_renderframe(draw);
+         tvout_profile(0, (unsigned int)(esp_timer_get_time() - t0));
          system_video(draw);
          tv_state = osd_tv_sync();
          last_ticks = nofrendo_ticks;

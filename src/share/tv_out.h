@@ -85,6 +85,10 @@ int tvout_lcd_hook(void);
 // TV is showing the picture.
 int tvout_frame_sync(float fps);
 
+// Optional, for the statistics on the LCD: how long a part of the frame took
+// (segment 0 = emulation, 1 = sound, 2 = keyboard), microseconds.
+void tvout_profile(int segment, uint32_t us);
+
 // For cores that copy or queue frames for the LCD task: 0 while the TV is on
 // and the LCD has nothing new to show, so that work can be skipped. The
 // source must still be passed to tvout_set_source.
